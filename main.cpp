@@ -8,7 +8,6 @@
 #include <cpprest/http_client.h>
 #include <cpprest/filestream.h>
 #include <atltime.h>
-#include <direct.h>
 
 //using namespace std;
 using namespace utility;                    // Common utilities like string conversions
@@ -17,22 +16,25 @@ using namespace web::http;                  // Common HTTP functionality
 using namespace web::http::client;          // HTTP client features
 using namespace concurrency::streams;       // Asynchronous streams
 
-const char* dir = "D:\\scan";
-
 class Reader {
 private:
     bool m_bProcess = true;
     void *m_handle{};
     MVID_CAM_OUTPUT_INFO *m_pstOutput{};
-    wchar_t billCode[MVID_MAX_CODECHARATERLEN] = {0};
+    wchar_t *billCode;
+    char *new_code;
+    char old_code[MVID_MAX_CODECHARATERLEN];
     MVID_IMAGE_INFO pstOutputImage = {0};
     char filename[256] = {0};
-    char fileRealname[256] = {0};
-    wchar_t *filename_word = L"";
+    char filenameKey[256] = {0};
+    CTime currTime;
 public:
     void Process();
+
     bool initDevices();
+
     void send();
+
     void saveImage(MVID_IMAGE_INFO pstInputImage);
 };
 
@@ -40,8 +42,6 @@ static unsigned int __stdcall ProcessThread(void *pUser) {
     auto *pThis = (Reader *) pUser;
     if (pThis) {
         pThis->Process();
-    } else {
-
     }
     return 0;
 }
@@ -82,40 +82,34 @@ void Reader::Process() {
             //ch:输出结果 | en:Output results
 //            strMsg.Format(_T("已识别 %d 个对象："), m_pstOutput->stCodeList.nCodeNum);
             for (int i = 0; i < m_pstOutput->stCodeList.nCodeNum; ++i) {
+                if (strcmp((char *)m_pstOutput->stCodeList.stCodeInfo[i].strCode, "yjcx.chinapost.com.cn") == 0) {
+                    continue;
+                }
                 wchar_t strWchar[MVID_MAX_CODECHARATERLEN] = {0};
                 Char2Wchar((char *) m_pstOutput->stCodeList.stCodeInfo[i].strCode, strWchar, MVID_MAX_CODECHARATERLEN);
                 std::wstring ws(strWchar);
                 std::string str(ws.begin(), ws.end());
-//                输出条码信息
-                std::cout << str << std::endl;
-                if (wcscmp(billCode, strWchar) != 0) {
-                    std::cout << m_pstOutput->stImage.nImageLen << std::endl;
-                    std::cout << m_pstOutput->stImage.enImageType << std::endl;
-                    std::cout << "old" << billCode << std::endl;
-                    std::cout << "new" << strWchar << std::endl;
-                    wcscpy_s(billCode,strWchar);
+                billCode = strWchar;
+                new_code = (char *) m_pstOutput->stCodeList.stCodeInfo[i].strCode;
 
-                    CTime currTime;                                     // ch:获取系统时间作为保存图片文件名 | en:Get the system time as the name of saved picture file
+
+//                输出条码信息
+                std::cout << "new_code: " << new_code << std::endl;
+                std::cout << "old_code: " << old_code << std::endl;
+                if (strcmp(new_code, old_code) != 0) {
+                    strcpy(old_code, new_code);
+
                     currTime = CTime::GetCurrentTime();
 
-                    sprintf(filename,("%s\\%s_%.4d%.2d%.2d%.2d%.2d%.2d.jpg"), dir, m_pstOutput->stCodeList.stCodeInfo[i].strCode, currTime.GetYear(), currTime.GetMonth(),
+                    sprintf(filenameKey, ("%s_%.4d%.2d%.2d%.2d%.2d%.2d"), new_code, currTime.GetYear(),
+                            currTime.GetMonth(),
                             currTime.GetDay(), currTime.GetHour(), currTime.GetMinute(), currTime.GetSecond());
-                    std::cout << filename << std::endl;
-
-
-                    sprintf(fileRealname,("%s_%.4d%.2d%.2d%.2d%.2d%.2d"), m_pstOutput->stCodeList.stCodeInfo[i].strCode, currTime.GetYear(), currTime.GetMonth(),
-                            currTime.GetDay(), currTime.GetHour(), currTime.GetMinute(), currTime.GetSecond());
-                    wchar_t code_strWchar[MVID_MAX_CODECHARATERLEN] = {0};
-                    Char2Wchar(fileRealname, code_strWchar, MVID_MAX_CODECHARATERLEN);
-                    std::wstring cws(code_strWchar);
-                    std::string cstr(cws.begin(), cws.end());
-                    filename_word = code_strWchar;
                     send();
                     saveImage(m_pstOutput->stImage);
                 }
             }
         } else {
-            std::cout << "识别失败，错误码 "<< nRet << std::endl;
+//            strMsg.Format(_T("识别失败，错误码 %x"), nRet);
         }
 
     }
@@ -143,24 +137,21 @@ bool Reader::initDevices() {
             nIp3 = ((pDeviceInfo->nCurrentIp & 0x0000ff00) >> 8);
             nIp4 = (pDeviceInfo->nCurrentIp & 0x000000ff);
 
-            std::cout << nIp1 <<"."<< nIp2 << "." << nIp3 << "." << nIp4 << std::endl;
+            std::cout << nIp1 << nIp2 << nIp3 << nIp4 << std::endl;
 
             int nRet = MVID_CR_CreateHandle(&m_handle, MVID_BCR | MVID_TDCR);
             if (MVID_CR_OK != nRet) {
 //                ShowErrorMsg(TEXT("MVID_CR_CreateHandle "), nRet);
-                std::cout << "MVID_CR_CreateHandle" << std::endl;
                 return false;
             }
             nRet = MVID_CR_CAM_BindDevice(m_handle, m_pstDevList->pstCamInfo[i]);
             if (MVID_CR_OK != nRet) {
 //                ShowErrorMsg(TEXT("MVID_CR_CAM_BindDevice "), nRet);
-                std::cout << "MVID_CR_CAM_BindDevice" << std::endl;
                 return false;
             }
             nRet = MVID_CR_CAM_StartGrabbing(m_handle);
             if (MVID_CR_OK != nRet) {
 //                ShowErrorMsg(TEXT("MVID_CR_CAM_StartGrabbing "), nRet);
-                std::cout << "MVID_CR_CAM_StartGrabbing" << std::endl;
                 return false;
             }
             unsigned int nThreadID = 0;
@@ -175,6 +166,15 @@ bool Reader::initDevices() {
 }
 
 void Reader::send() {
+    wchar_t strWchar[MVID_MAX_CODECHARATERLEN] = {0};
+    Char2Wchar(filenameKey, strWchar, MVID_MAX_CODECHARATERLEN);
+    std::wstring ws(strWchar);
+    std::string str(ws.begin(), ws.end());
+
+
+    if (!strWchar) {
+        return;
+    }
     auto fileStream = std::make_shared<ostream>();
 
     // Open stream to output file.
@@ -186,7 +186,7 @@ void Reader::send() {
 
                 // Build request URI and start the request.
                 uri_builder builder(U("/search"));
-                builder.append_query(U("billCode"), filename_word);
+                builder.append_query(U("billCode"), strWchar);
                 return client.request(methods::GET, builder.to_string());
             })
 
@@ -212,27 +212,25 @@ void Reader::send() {
     }
 }
 
-void Reader::saveImage(IN MVID_IMAGE_INFO pstInputImage) {
+void Reader::saveImage(MVID_IMAGE_INFO pstInputImage) {
     int nRet = MVID_CR_OK;
     nRet = MVID_CR_SaveImage(m_handle, &m_pstOutput->stImage, MVID_IMAGE_JPEG, &pstOutputImage, 80);
-    if (MVID_CR_OK == nRet)
-    {
+    if (MVID_CR_OK == nRet) {
         // ch:保存图像 | en:Save image
-        FILE* pfile = fopen(filename,"wb");
-        if(pfile == NULL)
-        {
-            return ;
+        // ch:获取系统时间作为保存图片文件名 | en:Get the system time as the name of saved picture file
+
+        sprintf(filename, ("D:\\scan\\%s.jpg"), filenameKey);
+        FILE *pfile = fopen(filename, "wb");
+        if (pfile == NULL) {
+            return;
         }
         fwrite(pstOutputImage.pImageBuf, 1, pstOutputImage.nImageLen, pfile);
-        fclose (pfile);
+        fclose(pfile);
         pfile = NULL;
     }
 }
 
 int main() {
-    if (_access(dir, 0) == -1) {
-        _mkdir(dir);
-    }
     Reader *pMain = new Reader();
     pMain->initDevices();
     std::cout << "Bye, World!" << std::endl;
